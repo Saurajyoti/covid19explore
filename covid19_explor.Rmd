@@ -1,0 +1,475 @@
+---
+title: |  
+  | \textbf{Covid-19 exploratory analysis, data fetched from CSSE Github data repository, John Hopkins University, United States}
+  |
+  |
+  |
+author: |
+  | **Saurajyoti Kar, Philadelphia, United States**
+  |
+  |
+  | **Date Created: `r Sys.Date()`**
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+
+!['covid 19 virus image'](C:/Users/sk3586/Documents/git_startup/covid-19_saura/covid19_2871-2560x852.png)\
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message=FALSE)
+```
+
+\newpage
+
+```{r packages, include=FALSE, message=FALSE}
+rm(list=ls())
+library(tidyverse)
+library(reshape2)
+library(doParallel)
+```
+
+```{r load data, include=FALSE, message=FALSE}
+path <- 'C:/Users/sk3586/Documents/git_startup/COVID-19/csse_covid_19_data/csse_covid_19_time_series'
+setwd(path)
+f_usa_conf <- 'time_series_covid19_confirmed_US.csv'
+f_glo_conf <- 'time_series_covid19_confirmed_global.csv'
+f_usa_de <- 'time_series_covid19_deaths_US.csv'
+f_glo_de <- 'time_series_covid19_deaths_global.csv'
+f_glo_rec <- 'time_series_covid19_recovered_global.csv'
+d_usa <- read_csv(f_usa_conf)
+d_glo <- read_csv(f_glo_conf)
+de_usa <- read_csv(f_usa_de)
+de_glo <- read_csv(f_glo_de)
+re_glo <- read_csv(f_glo_rec)
+
+d_usa
+d_glo
+de_usa
+de_glo
+re_glo
+```
+
+```{r change shape of global dataset, include=FALSE, message=FALSE}
+d1_glo <- d_glo %>% pivot_longer(
+     cols = 5:ncol(d_glo),
+     names_pattern = '(.*)/*',
+     names_to = "dated",
+     values_to = "confirmed",
+     values_drop_na = F
+ )
+de1_glo <- de_glo %>% pivot_longer(
+     cols = 5:ncol(d_glo),
+     names_pattern = '(.*)/*',
+     names_to = "dated",
+     values_to = "deaths",
+     values_drop_na = F
+ )
+re1_glo <- re_glo %>% pivot_longer(
+     cols = 5:ncol(d_glo),
+     names_pattern = '(.*)/*',
+     names_to = "dated",
+     values_to = "recovered",
+     values_drop_na = F
+ )
+d<- d1_glo %>%
+  full_join(de1_glo) %>%
+  full_join(re1_glo)
+
+```
+
+```{r change shape of usa dataset, include=FALSE}
+d1_usa <- d_usa %>% pivot_longer(
+     cols = 12:ncol(d_usa),
+     names_pattern = '(.*)/*',
+     names_to = "dated",
+     values_to = "confirmed",
+     values_drop_na = F
+ )
+de1_usa <- de_usa %>% pivot_longer(
+     cols = 13:ncol(de_usa),
+     names_pattern = '(.*)/*',
+     names_to = "dated",
+     values_to = "deaths",
+     values_drop_na = F
+ )
+#view(d1_usa)
+```
+
+# Confirmed cases across the world, cumulative counting
+
+```{r by country, fig.height=20, fig.width=20, echo=F,  warning=F, error=F, message=F}
+d2_glo <- d1_glo %>%
+  group_by(`Country/Region`, dated) %>%
+  summarise(n_confirmed=sum(confirmed)) %>%
+  mutate(dated = as.Date(dated, format="%m/%d/%y")) %>%
+  ungroup()
+#tmp <- d2_usa %>% mutate('Country/Region' = 'United States')
+#d2_glo <- rbind(tmp, d2_glo)
+#d2_glo
+
+country_order_desc <- d2_glo %>% 
+  filter(dated==max(dated)) %>%
+  arrange(desc(n_confirmed)) %>%
+  select(`Country/Region`) %>%
+  c()
+
+d3_glo <- d2_glo %>%
+  mutate(`Country/Region` = 
+           fct_relevel(`Country/Region`, 
+                     levels = c(country_order_desc)))
+
+confirm_global <- d3_glo %>%
+  group_by(`Country/Region`) %>%
+  summarise(max_bycountry = max(n_confirmed)) %>%
+  summarise(sum_allcases = sum(max_bycountry)) %>%
+  select(sum_allcases) %>%
+  as.numeric()
+
+ggplot(d3_glo, aes(dated, n_confirmed, colour = `Country/Region`)) +
+  geom_line() +
+  ggtitle(paste0('Confirned cases by country. Total global clases ', 
+                 format(confirm_global, big.mark = ',', scientific = F), '.\nCountries in legend ranked by highest to lowest number of cases.')) +
+  scale_x_date('Recorded dates', 
+               breaks = function(x) seq.Date(from = min(x), 
+   											  to = max(x), 
+   											  by = "1 week")) + 
+  scale_y_continuous('Number of confirmed cases cumulative (by country)',
+                     breaks = function (x) round(seq.int(from = min(x),
+                                to = max(x),
+                                length.out = 10))) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        text = element_text(size=22),
+        title = element_text(size=27)) + 
+  guides(col = guide_legend(nrow = 31))
+```
+
+\newpage
+
+# Confirmed cases in US states, cumulative counting
+
+```{r date vs cases by US province, fig.height=16, fig.width=20, echo=F,  warning=F, error=F, message=F, fig.keep='all'}
+d3_usa <- d1_usa %>% 
+  group_by(Province_State, dated) %>%
+  summarise(n_confirmed=sum(confirmed)) %>%
+  mutate(dated = as.Date(dated, "%m/%d/%y")) %>%
+  ungroup()
+
+# ordering the provinces on number of confirmed cases, descending
+province_order_desc <- d3_usa %>% 
+  filter(dated==max(dated)) %>%
+  arrange(desc(n_confirmed)) %>%
+  select(Province_State) %>%
+  c()
+
+d3_usa <- d3_usa %>%
+  mutate(Province_State = 
+           fct_relevel(Province_State, 
+                     levels = c(province_order_desc)))
+
+confirmed_us <- d3_usa %>%
+  group_by(Province_State) %>%
+  summarize(max_state = max(n_confirmed)) %>%
+  summarize(total_us = sum(max_state)) %>%
+  select(total_us) %>%
+  as.numeric()
+
+ggplot(d3_usa, aes(dated, n_confirmed, colour = Province_State)) +
+  geom_line() +
+  ggtitle(paste0('US confirmed cases by State. Total confirmed cases in US: ', 
+                 format(confirmed_us, big.mark = ',', scientific = F))) +
+  scale_x_date('Recorded dates', 
+               breaks = function(x) seq.Date(from = min(x), 
+   											  to = max(x), 
+   											  by = "1 week")) + 
+  scale_y_continuous('Number of confirmed cases (by US province)',
+                     breaks = function (x) round(seq.int(from = min(x),
+                                to = max(x),
+                                length.out = 10))) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        text = element_text(size=22),
+        title = element_text(size=27)) + 
+  guides(col = guide_legend(nrow = 10))
+```
+
+## Confirmed cases in US states except New York, cumulative counting
+
+```{r filtering out New York, fig.height=16, fig.width=20, echo=FALSE, message=FALSE, results='hide',fig.keep='all'}
+d4_usa <- d3_usa %>%
+  filter(!Province_State %in% c('New York'))
+
+ggplot(d4_usa, aes(dated, n_confirmed, colour = Province_State)) +
+  geom_line() +
+  ggtitle('US confirmed cases by State, without New York') +
+  scale_x_date('Recorded dates', 
+               breaks = function(x) seq.Date(from = min(x), 
+   											  to = max(x), 
+   											  by = "1 week")) + 
+  scale_y_continuous('Number of confirmed cases (by US province)',
+                     breaks = function (x) round(seq.int(from = min(x),
+                                to = max(x),
+                                length.out = 10))) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        text = element_text(size=22),
+        title = element_text(size=27)) + 
+  guides(col = guide_legend(nrow = 10))
+```
+
+# Confirmed cases by State or Province, per day counting and rate of increase per day
+
+```{r calculating cases per day and rate of case increase per day for US states and provinces, echo=F,  warning=F, error=F, message=F}
+
+d5_usa <- d3_usa
+
+d5_usa <- d5_usa %>%
+  mutate(Province_State = as.character(Province_State)) %>%
+  as.data.frame()
+
+cl <- makeCluster(parallel::detectCores())
+registerDoParallel(cl)
+
+# calculating cases per day
+tmp = foreach (i = 1:nrow(d5_usa), .combine = 'c', .inorder=T) %dopar% {
+  st = as.character(d5_usa[i,'Province_State'])
+  dt = d5_usa [i, 'dated']
+  dts = d5_usa[order(as.Date(d5_usa[which(d5_usa$Province_State == st), 'dated'])),'dated']
+  dt_pos = which(dts == dt)
+  if (dt_pos > 1){
+    prev_dt = dts[dt_pos-1]
+    d5_usa[i,'n_confirmed'] - d5_usa[which(d5_usa[,'Province_State'] == st &
+                                                   d5_usa[,'dated'] == prev_dt),'n_confirmed']
+  }else{
+    0
+  }
+}
+
+d5_usa$n_bydate = unlist(tmp)
+
+# calculating case increase per day
+tmp = foreach (i = 1:nrow(d5_usa), .combine = 'c', .inorder=T) %dopar% {
+  st = as.character(d5_usa[i,'Province_State'])
+  dt = d5_usa [i, 'dated']
+  dts = d5_usa[order(as.Date(d5_usa[which(d5_usa$Province_State == st), 'dated'])),'dated']
+  dt_pos = which(dts == dt)
+  if (dt_pos > 1){
+    prev_dt = dts[dt_pos-1]
+    d5_usa[i,'n_bydate'] - d5_usa[which(d5_usa[,'Province_State'] == st &
+                                                   d5_usa[,'dated'] == prev_dt),'n_bydate']
+  }else{
+    0
+  }
+}
+
+d5_usa$n_rate_bydate = unlist(tmp)
+```
+
+```{r plot by US state of confirmed cases per day and its rate, fig.height=5, fig.width=8, echo=FALSE, message=FALSE, results='hide', fig.keep='all'}
+st_uq = unique(d5_usa$`Province_State`)
+
+for (i in 1:length(st_uq)) {
+  
+  df <- d5_usa %>% filter(`Province_State` == st_uq[i])
+  
+  plt <- ggplot(df, aes(dated, n_bydate)) +
+    geom_line(color='gold2') +
+  geom_smooth() +
+  ggtitle(paste0(st_uq[i], '  - confirmed cases over time, ', 'total cases: ', format(tail(df$n_confirmed,1), big.mark=',', scientific=F))) +
+  scale_x_date('Recorded dates', 
+               breaks = function(x) seq.Date(from = min(x), 
+   											  to = max(x), 
+   											  by = "1 week")) + 
+  scale_y_continuous('Number of confirmed cases per date',
+                     breaks = function (x) round(seq.int(from = min(x),
+                                to = max(x),
+                                length.out = 10))) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none",
+        legend.title = element_blank(),
+        plot.title = element_text(face = "bold"))
+  print(plt)
+  
+  print('\n\n')
+
+  plt <- ggplot(df, aes(dated, n_rate_bydate)) +
+    geom_line(color='gold2') +
+  geom_smooth() +
+  ggtitle(paste0(st_uq[i], ' - rate of increase of confirmed cases over time')) +
+  scale_x_date('Recorded dates', 
+               breaks = function(x) seq.Date(from = min(x), 
+   											  to = max(x), 
+   											  by = "1 week")) + 
+  scale_y_continuous('Rate of identified confirmed cases per date',
+                     breaks = function (x) round(seq.int(from = min(x),
+                                to = max(x),
+                                length.out = 10))) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none",
+        legend.title = element_blank(),
+        plot.title = element_text(face = "bold"))
+  print(plt)
+  }
+```
+
+\newpage
+
+# Confirmed cases across countries, count per day
+
+```{r understanding the increase over day, fig.height=20, fig.width=20, echo=FALSE, message=FALSE, results='hide',fig.keep='all'}
+d4_glo <- d3_glo
+
+d4_glo <- d4_glo %>%
+  mutate(`Country/Region` = as.character(`Country/Region`)) %>%
+  as.data.frame()
+
+tmp = foreach (i = 1:nrow(d4_glo), .combine = 'c', .inorder=T) %dopar% {
+  cty = as.character(d4_glo[i,'Country/Region'])
+  dt = d4_glo [i, 'dated']
+  dts = d4_glo[order(as.Date(d4_glo[which(d4_glo$`Country/Region` == cty), 'dated'])),'dated']
+  dt_pos = which(dts == dt)
+  if (dt_pos > 1){
+    prev_dt = dts[dt_pos-1]
+    d4_glo[i,'n_confirmed'] - d4_glo[which(d4_glo[,'Country/Region'] == cty &
+                                                   d4_glo[,'dated'] == prev_dt),'n_confirmed']
+  }else{
+    0
+  }
+}
+
+d4_glo$n_bydate = unlist(tmp)
+
+d4_glo <- d4_glo %>%
+  mutate(`Country/Region` = as.factor(`Country/Region`))
+
+ggplot(d4_glo, aes(dated, n_bydate, colour = `Country/Region`)) +
+  geom_line() +
+  ggtitle('Confirmed cases per day for countries') +
+  scale_x_date('Recorded dates', 
+               breaks = function(x) seq.Date(from = min(x), 
+   											  to = max(x), 
+   											  by = "1 week")) + 
+  scale_y_continuous('Number of confirmed cases per date (by country)',
+                     breaks = function (x) round(seq.int(from = min(x),
+                                to = max(x),
+                                length.out = 10))) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        text = element_text(size=22),
+        title = element_text(size=27)) + 
+  guides(col = guide_legend(nrow = 31))
+```
+
+
+```{r adding smoother showing all countries, fig.height=20, fig.width=20, echo=FALSE, message=FALSE, results='hide', fig.keep='all'}
+ggplot(d4_glo, aes(dated, n_bydate, colour = `Country/Region`)) +
+  geom_smooth() +
+  ggtitle('Confirmed cases per day for countries, loess smoother applied') +
+  scale_x_date('Recorded dates', 
+               breaks = function(x) seq.Date(from = min(x), 
+   											  to = max(x), 
+   											  by = "1 week")) + 
+  scale_y_continuous('Number of confirmed cases per date (by country)',
+                     breaks = function (x) round(seq.int(from = min(x),
+                                to = max(x),
+                                length.out = 10))) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        text = element_text(size=22),
+        title = element_text(size=27)) + 
+  guides(col = guide_legend(nrow = 31))
+```
+
+
+```{r Studying the rate of increase of cases. Adding smoother per country, echo=FALSE, message=FALSE, results='hide', fig.keep='all'}
+
+d5_glo <- d4_glo
+
+tmp = foreach (i = 1:nrow(d5_glo), .combine = 'c', .packages=c("dplyr"), .inorder=T) %dopar% {
+  cty = as.character(d5_glo[i,'Country/Region'])
+  dt = d5_glo [i, 'dated']
+  dts = d5_glo[order(as.Date(d5_glo[which(d5_glo$`Country/Region` == cty), 'dated'])),'dated']
+  dt_pos = which(dts == dt)
+  if (dt_pos > 1){
+    prev_dt = dts[dt_pos-1]
+    d5_glo[i,'n_bydate'] - d5_glo[which(d5_glo[,'Country/Region'] == cty &
+                                                   d5_glo[,'dated'] == prev_dt),'n_bydate']
+  }else{
+    0
+  }
+}
+stopCluster(cl)
+
+d5_glo$n_rate_bydate = unlist(tmp)
+```
+
+# Confirmed cases by country, per day counting and rate of increase per day
+
+```{r Plotting cases and rate of cases per country, fig.height=5, fig.width=8, echo=FALSE, message=FALSE, results='hide', fig.keep='all'}
+cty_uq = unique(d5_glo$`Country/Region`)
+
+for (i in 1:length(cty_uq)) {
+  
+  df <- d4_glo %>% filter(`Country/Region` == cty_uq[i])
+  
+  #print(paste0(cty_uq[i], ', Total cases: ', format(tail(df$n_confirmed,1), big.mark=',', scientific=F)))
+  
+  plt <- ggplot(df, aes(dated, n_bydate)) +
+    geom_line(color='gold2') +
+  geom_smooth() +
+  ggtitle(paste0(cty_uq[i], '  - confirmed cases over time, ', 'total cases: ', format(tail(df$n_confirmed,1), big.mark=',', scientific=F))) +
+  scale_x_date('Recorded dates', 
+               breaks = function(x) seq.Date(from = min(x), 
+   											  to = max(x), 
+   											  by = "1 week")) + 
+  scale_y_continuous('Number of confirmed cases per date',
+                     breaks = function (x) round(seq.int(from = min(x),
+                                to = max(x),
+                                length.out = 10))) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none",
+        legend.title = element_blank(),
+        plot.title = element_text(face = "bold"))
+  print(plt)
+  
+  print('\n\n')
+
+  df <- d5_glo %>% filter(`Country/Region` == cty_uq[i])
+  
+  plt <- ggplot(df, aes(dated, n_rate_bydate)) +
+    geom_line(color='gold2') +
+  geom_smooth() +
+  ggtitle(paste0(cty_uq[i], ' - rate of increase of confirmed cases over time')) +
+  scale_x_date('Recorded dates', 
+               breaks = function(x) seq.Date(from = min(x), 
+   											  to = max(x), 
+   											  by = "1 week")) + 
+  scale_y_continuous('Rate of identified confirmed cases per date',
+                     breaks = function (x) round(seq.int(from = min(x),
+                                to = max(x),
+                                length.out = 10))) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none",
+        legend.title = element_blank(),
+        plot.title = element_text(face = "bold"))
+  print(plt)
+  }
+```
