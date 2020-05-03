@@ -492,6 +492,11 @@ us_pop <- us_pop %>%
   filter(variable == 'POP') %>%
   mutate(GEOID = as.numeric(GEOID))
 us_pop
+us_density <- get_estimates(geography = 'county', product = 'population')
+us_density <- us_density %>%
+  filter(variable == 'DENSITY') %>%
+  mutate(GEOID = as.numeric(GEOID))
+us_density
 
 d_recent <- max(d1_usa$dated)
 d_recent
@@ -507,13 +512,23 @@ d6_usa <- d6_usa %>%
   mutate(population = value) %>%
   select(FIPS, Province_State, dated, confirmed, population)
 
+d6_usa <- d6_usa %>%
+  left_join(us_density, by=c('FIPS' = 'GEOID')) %>%
+  mutate(density = value) %>%
+  select(FIPS, Province_State, dated, confirmed, population, density)
+
 # populations fetched from wiki pages
 d6_usa <- d6_usa %>%
   mutate(population = ifelse(Province_State == 'Virgin Islands', 104901, population),
          population = ifelse(Province_State == 'Puerto Rico', 3193694, population),
          population = ifelse(Province_State == 'Northern Mariana Islands', 53883, population),
          population = ifelse(Province_State == 'Guam', 162742, population),
-         population = ifelse(Province_State == 'American Samoa', 55212, population))
+         population = ifelse(Province_State == 'American Samoa', 55212, population),
+         density = ifelse(Province_State == 'Virgin Islands', 104901/133.75, density), # pop per sq mile
+         density = ifelse(Province_State == 'Puerto Rico', 908.6, density),
+         density = ifelse(Province_State == 'Northern Mariana Islands', 292.7, density),
+         density = ifelse(Province_State == 'Guam', 774.4, density),
+         density = ifelse(Province_State == 'American Samoa',259 , density))
 d6_usa
 
 d6_usa <- d6_usa %>%
@@ -524,34 +539,45 @@ d6_usa
 
 ```{r plot confirmed cases per population by county (for US mainland), echo=FALSE, message=FALSE, results='hide', fig.keep='all'}
 
-st.id = unique(sapply(as.character(d6_usa$FIPS), function(x) substr(x, 1,2)))
-us.map <- tigris::counties(state=st.id, cb = TRUE, year = 2016)
+#st.id = unique(sapply(as.character(d6_usa$FIPS), function(x) substr(x, 1,2)))
+#st.id = unique(sapply(as.character(us_pop$GEOID), function(s) substr(s, 1,2)))
+st.id = unique(sapply(us_pop$GEOID, function (s) s%/%1000))
+us.map <- tigris::counties(state=st.id, cb = TRUE, year = 2019)
 
-#! Projuce counties map
+##! Remove Alaska(2), Hawaii(15), Puerto Rico (72), Guam (66), Virgin Islands (78), American Samoa (60), Mariana Islands #(69), Micronesia (64), Marshall Islands (68), Palau (70), Minor Islands (74)
+us.map <- us.map[!us.map$STATEFP %in% c("02", "15", "72", "66", "78", "60", "69", "64", "68", "70", "74"),]
+##! Make sure other outling islands are removed.
+us.map <- us.map[!us.map$STATEFP %in% c("81", "84", "86", "87", "89", "71", "76", "95", "79"),]
+
+# Projuce counties map
 county_map <- fortify(us.map, region="GEOID")
+county_map <- county_map %>%
+  mutate(id = as.numeric(id))
 
-#! Obtian state map, to build the state boundaries
-#states_map <- map_data("state")
-state_dat = tigris::states(cb = TRUE, year = 2016)
-state_dat = state_dat[state_dat$STATEFP %in% c(st.id), ]
-#! Remove Alaska(2), Hawaii(15), Puerto Rico (72), Guam (66), Virgin Islands (78), American Samoa (60), Mariana Islands (69), Micronesia (64), Marshall Islands (68), Palau (70), Minor Islands (74)
-state_dat <- state_dat[!state_dat$STATEFP %in% c("02", "15", "72", "66", "78", "60", "69", "64", "68", "70", "74"),]
-#! Make sure other outling islands are removed.
-state_dat <- state_dat[!state_dat$STATEFP %in% c("81", "84", "86", "87", "89", "71", "76", "95", "79"),]
+##! Obtian state map, to build the state boundaries
+##states_map <- map_data("state")
+#state_dat = tigris::states(cb = TRUE, year = 2019)
+#state_dat = state_dat[state_dat$STATEFP %in% c(st.id), ]
+##! Remove Alaska(2), Hawaii(15), Puerto Rico (72), Guam (66), Virgin Islands (78), American Samoa (60), Mariana Islands #(69), Micronesia (64), Marshall Islands (68), Palau (70), Minor Islands (74)
+#state_dat <- state_dat[!state_dat$STATEFP %in% c("02", "15", "72", "66", "78", "60", "69", "64", "68", "70", "74"),]
+##! Make sure other outling islands are removed.
+#state_dat <- state_dat[!state_dat$STATEFP %in% c("81", "84", "86", "87", "89", "71", "76", "95", "79"),]
 
-#! Projuce state map
-state_dat=fortify(state_dat, region = "STUSPS")
+##! Projuce state map
+#state_dat=fortify(state_dat, region = "STUSPS")
 
 ggplot() + 
-  geom_polygon(data=state_dat, 
-               aes(x=long, y=lat, group=group), fill="gray94", color=NA) + # this is for shade within state boundaries
-  geom_polygon(data=state_dat, 
-               aes(x=long, y=lat, group=group), fill=NA, color="gray25", size=0.1) + # this is for state boundaries
+  #geom_polygon(data=state_dat, 
+  #             aes(x=long, y=lat, group=group), fill="gray94", color=NA) + # this is for shade within state boundaries
+  #geom_polygon(data=state_dat, 
+  #             aes(x=long, y=lat, group=group), fill=NA, color="gray25", size=0.1) + # this is for state boundaries
+  geom_polygon(data=us.map,
+                aes(x=long, y=lat, group=group), fill="gray94", color="gray25") +
   geom_map(aes(fill=confirmed_per_1M, map_id = FIPS),
            data = d6_usa, map=county_map, color="palevioletred3", size=0.05) + 
   
   scale_fill_gradient(low="green", high="red",
-                      name = "Confirmed/population",
+                      name = "Confirmed per million of county",
                       guide = guide_colorbar(nbin = 20, barheight = 4)) +
   coord_map() +
   theme_bw() +
@@ -568,7 +594,45 @@ ggplot() +
         legend.text=element_text(size=7),
         legend.title=element_text(size=9),
         legend.key.size =  unit(0.2, "in"),
-        legend.position = c(0, 0),
+        #legend.position = c(0.1, 0.1),
+        legend.text.align = 0)
+
+```
+
+```{r plot confirmed cases per unit density of each county (for US mainland)}
+d6_usa <- d6_usa %>%
+  mutate(confirmed_per_density = confirmed/density)
+d6_usa
+
+ggplot() + 
+  #geom_polygon(data=state_dat, 
+  #             aes(x=long, y=lat, group=group), fill="gray94", color=NA) + # this is for shade within state boundaries
+  #geom_polygon(data=state_dat, 
+  #             aes(x=long, y=lat, group=group), fill=NA, color="gray25", size=0.1) + # this is for state boundaries
+  geom_polygon(data=us.map,
+                aes(x=long, y=lat, group=group), fill="gray94", color="gray25") +
+  geom_map(aes(fill=confirmed_per_density, map_id = FIPS),
+           data = d6_usa, map=county_map, color="palevioletred3", size=0.05) + 
+  
+  scale_fill_gradient(low="green", high="red",
+                      name = "Confirmed per density of county",
+                      guide = guide_colorbar(nbin = 20, barheight = 4)) +
+  coord_map() +
+  theme_bw() +
+  theme(axis.line=element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        legend.text=element_text(size=7),
+        legend.title=element_text(size=9),
+        legend.key.size =  unit(0.2, "in"),
+        #legend.position = c(0.1, 0.1),
         legend.text.align = 0)
 
 ```
