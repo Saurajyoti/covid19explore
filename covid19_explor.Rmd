@@ -101,7 +101,7 @@ de1_usa <- de_usa %>% pivot_longer(
 
 # Confirmed cases across the world, cumulative counting
 
-```{r by country, fig.height=20, fig.width=20, echo=F,  warning=F, error=F, message=F}
+```{r echo=F,  warning=F, error=F, message=F}
 d2_glo <- d1_glo %>%
   group_by(`Country/Region`, dated) %>%
   summarise(n_confirmed=sum(confirmed)) %>%
@@ -129,6 +129,9 @@ confirm_global <- d3_glo %>%
   select(sum_allcases) %>%
   as.numeric()
 
+```
+
+```{r plot confirmed cases by country, fig.height=20, fig.width=20, echo=F,  warning=F, error=F, message=F}
 ggplot(d3_glo, aes(dated, n_confirmed, colour = `Country/Region`)) +
   geom_line() +
   ggtitle(paste0('Confirned cases by country. Total global clases ', 
@@ -154,7 +157,7 @@ ggplot(d3_glo, aes(dated, n_confirmed, colour = `Country/Region`)) +
 
 # Confirmed cases in US states, cumulative counting
 
-```{r date vs cases by US province, fig.height=16, fig.width=20, echo=F,  warning=F, error=F, message=F, fig.keep='all'}
+```{r echo=F,  warning=F, error=F, message=F}
 d3_usa <- d1_usa %>% 
   group_by(Province_State, dated) %>%
   summarise(n_confirmed=sum(confirmed)) %>%
@@ -180,6 +183,9 @@ confirmed_us <- d3_usa %>%
   select(total_us) %>%
   as.numeric()
 
+```
+
+```{r plot date vs cases by US province, fig.height=16, fig.width=20, echo=F,  warning=F, error=F, message=F, fig.keep='all' }
 ggplot(d3_usa, aes(dated, n_confirmed, colour = Province_State)) +
   geom_line() +
   ggtitle(paste0('US confirmed cases by State. Total confirmed cases in US: ', 
@@ -328,7 +334,7 @@ for (i in 1:length(st_uq)) {
 
 # Confirmed cases across countries, count per day
 
-```{r understanding the increase over day, fig.height=20, fig.width=20, echo=FALSE, message=FALSE, results='hide',fig.keep='all'}
+```{r understanding the increase over day, echo=FALSE, message=FALSE, results='hide'}
 d4_glo <- d3_glo
 
 d4_glo <- d4_glo %>%
@@ -354,6 +360,9 @@ d4_glo$n_bydate = unlist(tmp)
 d4_glo <- d4_glo %>%
   mutate(`Country/Region` = as.factor(`Country/Region`))
 
+```
+
+```{r plot nderstanding the increase over day, fig.height=20, fig.width=20, echo=FALSE, message=FALSE, results='hide',fig.keep='all'}
 ggplot(d4_glo, aes(dated, n_bydate, colour = `Country/Region`)) +
   geom_line() +
   ggtitle('Confirmed cases per day for countries') +
@@ -472,4 +481,94 @@ for (i in 1:length(cty_uq)) {
         plot.title = element_text(face = "bold"))
   print(plt)
   }
+```
+
+```{r cases per population, echo=FALSE, message=FALSE, results='hide'}
+library(tidycensus)
+
+readRenviron("~/.Renviron")
+us_pop <- get_estimates(geography = 'county', product = 'population')
+us_pop <- us_pop %>%
+  filter(variable == 'POP') %>%
+  mutate(GEOID = as.numeric(GEOID))
+us_pop
+
+d_recent <- max(d1_usa$dated)
+d_recent
+
+d6_usa <- d1_usa %>%
+  filter(dated == d_recent) %>%
+  select(FIPS, Province_State, dated, confirmed)
+
+head(d6_usa)
+
+d6_usa <- d6_usa %>%
+  left_join(us_pop, by=c('FIPS' = 'GEOID')) %>%
+  mutate(population = value) %>%
+  select(FIPS, Province_State, dated, confirmed, population)
+
+# populations fetched from wiki pages
+d6_usa <- d6_usa %>%
+  mutate(population = ifelse(Province_State == 'Virgin Islands', 104901, population),
+         population = ifelse(Province_State == 'Puerto Rico', 3193694, population),
+         population = ifelse(Province_State == 'Northern Mariana Islands', 53883, population),
+         population = ifelse(Province_State == 'Guam', 162742, population),
+         population = ifelse(Province_State == 'American Samoa', 55212, population))
+d6_usa
+
+d6_usa <- d6_usa %>%
+  mutate(confirmed_per_1M = confirmed/population*1e6)
+
+d6_usa
+```
+
+```{r plot confirmed cases per population by county (for US mainland), echo=FALSE, message=FALSE, results='hide', fig.keep='all'}
+
+st.id = unique(sapply(as.character(d6_usa$FIPS), function(x) substr(x, 1,2)))
+us.map <- tigris::counties(state=st.id, cb = TRUE, year = 2016)
+
+#! Projuce counties map
+county_map <- fortify(us.map, region="GEOID")
+
+#! Obtian state map, to build the state boundaries
+#states_map <- map_data("state")
+state_dat = tigris::states(cb = TRUE, year = 2016)
+state_dat = state_dat[state_dat$STATEFP %in% c(st.id), ]
+#! Remove Alaska(2), Hawaii(15), Puerto Rico (72), Guam (66), Virgin Islands (78), American Samoa (60), Mariana Islands (69), Micronesia (64), Marshall Islands (68), Palau (70), Minor Islands (74)
+state_dat <- state_dat[!state_dat$STATEFP %in% c("02", "15", "72", "66", "78", "60", "69", "64", "68", "70", "74"),]
+#! Make sure other outling islands are removed.
+state_dat <- state_dat[!state_dat$STATEFP %in% c("81", "84", "86", "87", "89", "71", "76", "95", "79"),]
+
+#! Projuce state map
+state_dat=fortify(state_dat, region = "STUSPS")
+
+ggplot() + 
+  geom_polygon(data=state_dat, 
+               aes(x=long, y=lat, group=group), fill="gray94", color=NA) + # this is for shade within state boundaries
+  geom_polygon(data=state_dat, 
+               aes(x=long, y=lat, group=group), fill=NA, color="gray25", size=0.1) + # this is for state boundaries
+  geom_map(aes(fill=confirmed_per_1M, map_id = FIPS),
+           data = d6_usa, map=county_map, color="palevioletred3", size=0.05) + 
+  
+  scale_fill_gradient(low="green", high="red",
+                      name = "Confirmed/population",
+                      guide = guide_colorbar(nbin = 20, barheight = 4)) +
+  coord_map() +
+  theme_bw() +
+  theme(axis.line=element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        legend.text=element_text(size=7),
+        legend.title=element_text(size=9),
+        legend.key.size =  unit(0.2, "in"),
+        legend.position = c(0, 0),
+        legend.text.align = 0)
+
 ```
