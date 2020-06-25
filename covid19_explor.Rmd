@@ -17,7 +17,7 @@ editor_options:
 ---
 
 
-!['covid 19 virus image'](C:/Users/sk3586/Documents/git_startup/covid-19_saura/covid19_2871-2560x852.png)\
+!['covid 19 virus image'](C:/Users/saura/git_startup/covid-19_saura/covid19_2871-2560x852.png)\
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message=FALSE)
@@ -30,10 +30,19 @@ rm(list=ls())
 library(tidyverse)
 library(reshape2)
 library(doParallel)
+library(tidycensus)
+library(rgdal)
+library(maptools)
+
+if (!require(gpclib)) install.packages("gpclib", type="source")
+
+gpclibPermit()
+
+readRenviron("~/.Renviron")
 ```
 
 ```{r load data, include=FALSE, message=FALSE}
-path <- 'C:/Users/sk3586/Documents/git_startup/COVID-19/csse_covid_19_data/csse_covid_19_time_series'
+path <- 'C:/Users/saura/git_startup/COVID-19/csse_covid_19_data/csse_covid_19_time_series'
 setwd(path)
 f_usa_conf <- 'time_series_covid19_confirmed_US.csv'
 f_glo_conf <- 'time_series_covid19_confirmed_global.csv'
@@ -484,9 +493,7 @@ for (i in 1:length(cty_uq)) {
 ```
 
 ```{r cases per population, echo=FALSE, message=FALSE, results='hide'}
-library(tidycensus)
 
-readRenviron("~/.Renviron")
 us_pop <- get_estimates(geography = 'county', product = 'population')
 us_pop <- us_pop %>%
   filter(variable == 'POP') %>%
@@ -532,10 +539,12 @@ d6_usa <- d6_usa %>%
 d6_usa
 
 d6_usa <- d6_usa %>%
-  mutate(confirmed_per_1M = confirmed/population*1e6)
+  mutate(confirmed_per_1M = confirmed/population*1000)
 
 d6_usa
 ```
+
+# Confirmed cases per 1000 of each county of United States mainland
 
 ```{r plot confirmed cases per population by county (for US mainland), echo=FALSE, message=FALSE, results='hide', fig.keep='all'}
 
@@ -576,8 +585,8 @@ ggplot() +
   geom_map(aes(fill=confirmed_per_1M, map_id = FIPS),
            data = d6_usa, map=county_map, color="palevioletred3", size=0.05) + 
   
-  scale_fill_gradient(low="green", high="red",
-                      name = "Confirmed per million of county",
+  scale_fill_gradient(low="yellow", high="red",
+                      name = "Confirmed per 1000 for each county",
                       guide = guide_colorbar(nbin = 20, barheight = 4)) +
   coord_map() +
   theme_bw() +
@@ -594,12 +603,14 @@ ggplot() +
         legend.text=element_text(size=7),
         legend.title=element_text(size=9),
         legend.key.size =  unit(0.2, "in"),
-        #legend.position = c(0.1, 0.1),
+        legend.position = "bottom",
         legend.text.align = 0)
 
 ```
 
-```{r plot confirmed cases per unit density of each county (for US mainland)}
+# Confirmed cases per density of each county of United States mainland
+
+```{r plot confirmed cases per unit density of each county (for US mainland), echo=FALSE, message=FALSE, results='hide', fig.keep='all'}
 d6_usa <- d6_usa %>%
   mutate(confirmed_per_density = confirmed/density)
 d6_usa
@@ -614,7 +625,7 @@ ggplot() +
   geom_map(aes(fill=confirmed_per_density, map_id = FIPS),
            data = d6_usa, map=county_map, color="palevioletred3", size=0.05) + 
   
-  scale_fill_gradient(low="green", high="red",
+  scale_fill_gradient(low="yellow", high="red",
                       name = "Confirmed per density of county",
                       guide = guide_colorbar(nbin = 20, barheight = 4)) +
   coord_map() +
@@ -632,7 +643,7 @@ ggplot() +
         legend.text=element_text(size=7),
         legend.title=element_text(size=9),
         legend.key.size =  unit(0.2, "in"),
-        #legend.position = c(0.1, 0.1),
+        legend.position = "bottom",
         legend.text.align = 0)
 
 ```
