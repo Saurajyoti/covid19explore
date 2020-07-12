@@ -1,0 +1,126 @@
+---
+title: |  
+  | \textbf{Mobility exploratory analysis, data received from Cuebiq}
+  |
+  |
+  |
+author: |
+  | **Saurajyoti Kar, Philadelphia, United States**
+  |
+  |
+  | **Date Created: `r Sys.Date()`**
+output:
+  pdf_document: default
+  html_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(doParallel)
+```
+
+```{r}
+
+path <- 'C:/Users/saura/data/Drexel cmi-20200526.csv000'
+fname <- 'Drexel cmi-20200526.csv000'
+
+d <- read_csv(paste0(path,'/', fname))
+
+d1 <- d %>%
+  arrange(ref_dt)
+
+str(d1)
+colnames(d1)
+d1
+View(d1)
+
+d1 <- d1 %>%
+  mutate(week_of = str_extract(week_name, "[0-9]?[0-9]?[0-9]?[0-9]-[0-9]?[0-9]-[0-9]?[0-9]")) %>%
+  mutate(week_of = as.Date(week_of, format="%Y-%m-%d"),
+         ref_dt = as.Date(ref_dt, format="%Y-%m-%d"))
+
+range (d1$week_of)
+unique(d1$week_of)
+```
+
+```{r}
+p <- ggplot(d1) +
+  geom_smooth(aes(ref_dt, cmi, color = county_fips_code), se = F, size = .08) +
+  theme_classic() +
+  theme(legend.position="none")
+setwd(path)
+ggsave("cmi_bydate_counties.png", p, dpi=900)
+```
+
+```{r loading covid-19 count data setand wangling}
+path2 <- 'C:/Users/saura/git_startup/COVID-19/csse_covid_19_data/csse_covid_19_time_series'
+f_usa_conf <- 'time_series_covid19_confirmed_US.csv'
+d_usa <- read_csv(paste0(path2, '/',f_usa_conf))
+
+#change shape of the data
+
+d1_usa <- d_usa %>% pivot_longer(
+     cols = 12:ncol(d_usa),
+     names_pattern = '(.*)/*',
+     names_to = "dated",
+     values_to = "confirmed",
+     values_drop_na = F
+ )
+
+# Confirmed cases in US county, cumulative counting
+
+d1_usa <- d1_usa %>% 
+  group_by(FIPS, dated) %>%
+  summarise(n_confirmed=sum(confirmed)) %>%
+  mutate(dated = as.Date(dated, "%m/%d/%y")) %>%
+  ungroup()
+
+
+# calculating cases per day by FIPS
+
+d1_usa <- d1_usa %>%
+  mutate(FIPS = as.character(FIPS)) %>%
+  as.data.frame()
+
+cl <- makeCluster(parallel::detectCores())
+registerDoParallel(cl)
+
+tmp = foreach (i = 1:nrow(d1_usa), .combine = 'c', .inorder=T) %dopar% {
+  fips = as.character(d1_usa[i,'FIPS'])
+  dt = d1_usa [i, 'dated']
+  dts = d1_usa[order(as.Date(d1_usa[which(d1_usa$FIPS == fips), 'dated'])),'dated']
+  dt_pos = which(dts == dt)
+  if (dt_pos > 1){
+    prev_dt = dts[dt_pos-1]
+    d1_usa[i,'n_confirmed'] - d1_usa[which(d1_usa[,'FIPS'] == fips & 
+                                             d1_usa[,'dated'] == prev_dt),'n_confirmed']
+  }else{
+    0
+  }
+}
+
+d1_usa$n_bydate = unlist(tmp)
+stopCluster(cl)
+
+```
+
+```{r join the tables}
+d2 <- d1 %>%
+  mutate(county_fips_code = as.double(county_fips_code)) %>%
+  left_join(d3_usa, by = c("county_fips_code" = "FIPS", "ref_dt" = "dated"))
+str(d2)
+
+d3 <- d2 %>%
+  drop_na(cmi, n_confirmed)
+str(d3)
+
+d2 %>%
+  group_by()
+```
