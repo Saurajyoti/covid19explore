@@ -22,8 +22,15 @@ knitr::opts_chunk$set(echo = FALSE, warning=FALSE, message=FALSE)
 
 ```{r}
 library(tidyverse)
+library(broom)
 library(lubridate)
 library(doParallel)
+library(rgdal)
+library(maptools)
+
+if (!require(gpclib)) install.packages("gpclib", type="source")
+
+gpclibPermit()
 ```
 
 ```{r}
@@ -59,7 +66,7 @@ setwd(path)
 ggsave("cmi_bydate_counties.png", p, dpi=900)
 ```
 
-```{r loading covid-19 count data setand wangling}
+```{r loading covid-19 count data set and wangling}
 path2 <- 'C:/Users/saura/git_startup/COVID-19/csse_covid_19_data/csse_covid_19_time_series'
 f_usa_conf <- 'time_series_covid19_confirmed_US.csv'
 d_usa <- read_csv(paste0(path2, '/',f_usa_conf))
@@ -77,6 +84,7 @@ d1_usa <- d_usa %>% pivot_longer(
 # Confirmed cases in US county, cumulative counting
 
 d1_usa <- d1_usa %>% 
+  drop_na(FIPS, dated) %>%
   group_by(FIPS, dated) %>%
   summarise(n_confirmed=sum(confirmed)) %>%
   mutate(dated = as.Date(dated, "%m/%d/%y")) %>%
@@ -111,16 +119,150 @@ stopCluster(cl)
 
 ```
 
+```{r Applying a lag of 5 days to identified confirmed case count}
+lag_days = 5
+d2_usa <- d1_usa %>%
+  mutate(dated = dated - lag_days)
+```
+
 ```{r join the tables}
 d2 <- d1 %>%
-  mutate(county_fips_code = as.double(county_fips_code)) %>%
-  left_join(d3_usa, by = c("county_fips_code" = "FIPS", "ref_dt" = "dated"))
+  mutate(county_fips_code = county_fips_code) %>%
+  left_join(d2_usa, by = c("county_fips_code" = "FIPS", "ref_dt" = "dated"))
 str(d2)
 
 d3 <- d2 %>%
-  drop_na(cmi, n_confirmed)
+  drop_na(cmi, n_confirmed) %>%
+  mutate(cmi_antilog_km = 10^cmi/1000,
+         n_confirmed_log = log10(n_confirmed+1))
 str(d3)
 
-d2 %>%
-  group_by()
+hist (d3$cmi)
+hist (d3$n_confirmed_log)
+
+```
+
+```{r filtering out days with no n detected}
+nrow(d3)
+d3 <- d3 %>%
+  filter(n_confirmed > 0)
+nrow(d3)
+```
+
+```{r cmi vs n_confirmed_log}
+
+p <- ggplot(d3) +
+  geom_smooth(aes(cmi, n_confirmed_log, color = county_fips_code), se = F, size = .08, method = lm) +
+  theme_classic() +
+  theme(legend.position="none")
+setwd(path)
+ggsave("cmi_vs_n_log10_bycounty.png", p, dpi=900)
+
+p <- ggplot(d3) +
+  geom_smooth(aes(cmi, n_confirmed_log, color = state_name), se = F, size = .08, method = lm) +
+  theme_classic() +
+  theme(legend.position="none")
+setwd(path)
+ggsave("cmi_vs_n_log10_bystate.png", p, dpi=900)
+
+```
+
+```{r correlation test}
+cor.test(d3$cmi, d3$n_confirmed_log)
+
+#d3 %>%
+#  group_by(county_fips_code) %>%
+#  summarize(cor.test(cmi, n_confirmed))
+
+# tabling the data by groups
+d4 <- d3 %>%
+  select(county_name, state_name, county_fips_code, cmi, n_confirmed_log) %>%
+  group_by(county_fips_code) %>%
+  nest(data=c(cmi, n_confirmed_log))
+d4
+#str(slice(d4, 1))
+
+# creating a function to define the correlation test
+cor_fun1 <- function (df, method = "pearson"){
+  cor.test(df$cmi, df$n_confirmed_log, method=method) %>%
+    tidy()
+}
+
+# map, run cor_fun1, un-table the model output
+d5 <- d4 %>% 
+  mutate(cor_model = map(data,cor_fun1)) %>%
+  select(-data) %>%
+  unnest()
+d5
+
+d5 <- d5%>%
+  mutate(conf_sign = ifelse(p.value < 0.05, "signif", "not_signif"))
+nrow(d5)
+
+d6 <- d5 %>%
+  filter(conf_sign == "signif")
+nrow(d6)
+
+```
+
+```{r map plot of correlation test statistic, echo=FALSE, message=FALSE, results='hide', fig.keep='all'}
+
+#st.id = unique(sapply(as.character(d6_usa$FIPS), function(x) substr(x, 1,2)))
+#st.id = unique(sapply(as.character(us_pop$GEOID), function(s) substr(s, 1,2)))
+st.id = unique(sapply(as.double(d6$county_fips_code), function (s) s%/%1000))
+us.map <- tigris::counties(state=st.id, cb = TRUE, year = 2019)
+
+##! Remove Alaska(2), Hawaii(15), Puerto Rico (72), Guam (66), Virgin Islands (78), American Samoa (60), Mariana Islands #(69), Micronesia (64), Marshall Islands (68), Palau (70), Minor Islands (74)
+us.map <- us.map[!us.map$STATEFP %in% c("02", "15", "72", "66", "78", "60", "69", "64", "68", "70", "74"),]
+##! Make sure other outling islands are removed.
+us.map <- us.map[!us.map$STATEFP %in% c("81", "84", "86", "87", "89", "71", "76", "95", "79"),]
+
+# Projuce counties map
+county_map <- fortify(us.map, region="GEOID")
+county_map <- county_map %>%
+  mutate(id = as.numeric(id))
+
+##! Obtian state map, to build the state boundaries
+##states_map <- map_data("state")
+#state_dat = tigris::states(cb = TRUE, year = 2019)
+#state_dat = state_dat[state_dat$STATEFP %in% c(st.id), ]
+##! Remove Alaska(2), Hawaii(15), Puerto Rico (72), Guam (66), Virgin Islands (78), American Samoa (60), Mariana Islands #(69), Micronesia (64), Marshall Islands (68), Palau (70), Minor Islands (74)
+#state_dat <- state_dat[!state_dat$STATEFP %in% c("02", "15", "72", "66", "78", "60", "69", "64", "68", "70", "74"),]
+##! Make sure other outling islands are removed.
+#state_dat <- state_dat[!state_dat$STATEFP %in% c("81", "84", "86", "87", "89", "71", "76", "95", "79"),]
+
+##! Projuce state map
+#state_dat=fortify(state_dat, region = "STUSPS")
+
+ggplot() + 
+  #geom_polygon(data=state_dat, 
+  #             aes(x=long, y=lat, group=group), fill="gray94", color=NA) + # this is for shade within state boundaries
+  #geom_polygon(data=state_dat, 
+  #             aes(x=long, y=lat, group=group), fill=NA, color="gray25", size=0.1) + # this is for state boundaries
+  geom_polygon(data=us.map,
+                aes(x=long, y=lat, group=group), fill="gray94", color="gray25") +
+  geom_map(aes(fill=statistic, map_id = county_fips_code),
+           data = d6, map=county_map, color="palevioletred3", size=0.05) + 
+  
+  scale_fill_gradient(low="red", high="yellow",
+                      name = "Pearson test statistic for significant cases",
+                      guide = guide_colorbar(nbin = 20, barheight = 4)) +
+  coord_map() +
+  theme_bw() +
+  theme(axis.line=element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks=element_blank(),
+        axis.title.x=element_blank(),
+        axis.title.y=element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank(),
+        legend.text=element_text(size=7),
+        legend.title=element_text(size=9),
+        legend.key.size =  unit(0.2, "in"),
+        legend.position = "bottom",
+        legend.text.align = 0)
+
 ```
