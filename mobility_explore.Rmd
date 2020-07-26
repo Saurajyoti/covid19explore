@@ -61,9 +61,18 @@ unique(d1$week_of)
 p <- ggplot(d1) +
   geom_smooth(aes(ref_dt, cmi, color = county_fips_code), se = F, size = .08) +
   theme_classic() +
+  labs(x = "Date", y = "Cuebiq Mobility Index by county") + 
   theme(legend.position="none")
 setwd(path)
-ggsave("cmi_bydate_counties.png", p, dpi=900)
+ggsave("cmi_bydate_counties.png", p, dpi=900, height = 4, width = 7)
+
+p <- ggplot(d1) +
+  geom_smooth(aes(ref_dt, cmi, color = state_name), se = F, size = .2) +
+  theme_classic() +
+  labs(x = "Date", y = "Cuebiq Mobility Index by state") + 
+  theme(legend.position="none")
+setwd(path)
+ggsave("cmi_bydate_state.png", p, dpi=900, height = 4, width = 7)
 ```
 
 ```{r loading covid-19 count data set and wangling}
@@ -120,6 +129,9 @@ stopCluster(cl)
 ```
 
 ```{r Applying a lag of 5 days to identified confirmed case count}
+#ref #1: https://www.health.harvard.edu/diseases-and-conditions/covid-19-basics#:~:text=Recently%20published%20research%20found%20that,as%2013%20days%20later.
+#ref #2: https://www.cdc.gov/coronavirus/2019-ncov/hcp/clinical-guidance-management-patients.html
+
 lag_days = 5
 d2_usa <- d1_usa %>%
   mutate(dated = dated - lag_days)
@@ -154,16 +166,18 @@ nrow(d3)
 p <- ggplot(d3) +
   geom_smooth(aes(cmi, n_confirmed_log, color = county_fips_code), se = F, size = .08, method = lm) +
   theme_classic() +
+  labs(x = 'Cuebiq mobility index, fitting by county', y = 'log10(confirmed cases)') +
   theme(legend.position="none")
 setwd(path)
-ggsave("cmi_vs_n_log10_bycounty.png", p, dpi=900)
+ggsave("cmi_vs_n_log10_bycounty.png", p, dpi=900, height = 4, width = 7)
 
 p <- ggplot(d3) +
-  geom_smooth(aes(cmi, n_confirmed_log, color = state_name), se = F, size = .08, method = lm) +
+  geom_smooth(aes(cmi, n_confirmed_log, color = state_name), se = F, size = .2, method = lm) +
   theme_classic() +
+   labs(x = 'Cuebiq mobility index, fitting by state', y = 'log10(confirmed cases)') +
   theme(legend.position="none")
 setwd(path)
-ggsave("cmi_vs_n_log10_bystate.png", p, dpi=900)
+ggsave("cmi_vs_n_log10_bystate.png", p, dpi=900, height = 4, width = 7)
 
 ```
 
