@@ -33,7 +33,7 @@ out <- ncdc(datasetid='NORMAL_DLY', stationid='GHCND:USW00014895',
             datatypeid='dly-tmax-normal', 
             startdate = '2009-05-01', enddate = '2010-05-10')
 
-head( out$data )
+out$data
 
 with_units <- ncdc(datasetid='GHCND', stationid='GHCND:USW00014895', 
                    datatypeid='PRCP', 
